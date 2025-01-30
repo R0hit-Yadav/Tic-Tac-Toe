@@ -1,6 +1,7 @@
 use tokio::net::{TcpListener, TcpStream}; // TcpListener and TcpStream for TCP networking
 use tokio::sync::Mutex; // for synchronization
 use std::sync::Arc; // for reference counting
+use std::collections::HashMap;
 use std::io::{self}; 
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt}; // for asynchronous I/O operations
 
@@ -10,8 +11,8 @@ async fn main() -> io::Result<()>
 {
     
     let listener = TcpListener::bind("127.0.0.1:2525").await?; // Bind the TCP listener to the address
-    let state = Arc::new(Mutex::new(GameState::new()));  // Create a shared game state
-    let mut player_count = 0;
+    let games: Arc<Mutex<HashMap<usize, Arc<Mutex<GameState>>>>> = Arc::new(Mutex::new(HashMap::new()));// for store multipl games with game_id
+    let mut player_queue = Vec::new();
 
     println!("Server is running on 127.0.0.1:2525");
 
@@ -19,18 +20,23 @@ async fn main() -> io::Result<()>
     // Accept incoming connections
     while let Ok((stream, _)) = listener.accept().await 
     {
-        player_count += 1;
-        // chacked for two players
-        if player_count > 2 
-        {
-            println!("Only two players can play.");
-            break;
+        let mut games_lock = games.lock().await; // Lock the game hashmap
+        player_queue.push(stream);//add players into queue
+
+        if player_queue.len() >= 2 { // for make game with two player
+            let game_id = games_lock.len() + 1; //give unique id to game
+            let game_state = Arc::new(Mutex::new(GameState::new()));
+            games_lock.insert(game_id, game_state.clone()); // store game state and id in hashmap
+
+            let player1 = player_queue.remove(0);
+            let player2 = player_queue.remove(0);
+
+            // Spawn tasks for two players
+            tokio::spawn(handle_player(player1, game_state.clone(), 1, game_id));
+            tokio::spawn(handle_player(player2, game_state.clone(), 2, game_id));
+
+            println!("Game {} started with two players!", game_id);
         }
-
-        let state_clone = state.clone();
-
-        // Spawn a new task to handle the player
-        tokio::spawn(async move {handle_player(stream, state_clone, player_count).await});
     }
     Ok(())
 }
@@ -86,7 +92,7 @@ impl GameState
         }
         self.board[position] = symbol.to_string();
 
-        println!("Updated Board:\n{}", self.display_board());
+        // println!("Updated Board:\n{}", self.display_board());
         Ok(())
     }
 
@@ -112,16 +118,16 @@ impl GameState
     }
 }
 
-async fn handle_player(stream: TcpStream, state: Arc<Mutex<GameState>>, player_id: usize) 
+async fn handle_player(stream: TcpStream, state: Arc<Mutex<GameState>>, player_id: usize,game_id: usize) 
 {
     // split the stream into reader and writer
     let (reader, mut writer) = tokio::io::split(stream);
     let mut reader = tokio::io::BufReader::new(reader);
 
     // give symbols to players
-    let symbol = if player_id == 1 {"🅾️"} else {"❎"};
+    let symbol = if player_id == 1 {"⭕"} else {"❌"};
 
-    writer.write_all(format!("You are Player {} ({})\n", player_id, symbol).as_bytes()).await.unwrap();
+    writer.write_all(format!("You are Player {} ({}) in Game {}\n", player_id, symbol, game_id).as_bytes()).await.unwrap();
 
     loop 
     {
@@ -156,9 +162,11 @@ async fn handle_player(stream: TcpStream, state: Arc<Mutex<GameState>>, player_i
         {
             Ok(_) => 
             {
+                println!("Updated Board: Game {}\n{}", game_id, state.display_board());// print final board who win
                 state.current_player = if player_id == 1 { 2 } else { 1 }; // Switch turn to the other player
                 if let Some(winner) = state.winner_chacking() 
                 {
+                    let final_board = state.display_board();
                     let message = if winner == "Draw" 
                     {
                         "Game Over! It's a Draw 🤝".to_string()
@@ -168,18 +176,30 @@ async fn handle_player(stream: TcpStream, state: Arc<Mutex<GameState>>, player_i
                         format!("Game Over! Winner: {}", winner)
                     };
 
-                    
+
                     
                     // Notify both players about the game result
-                    writer.write_all(format!("{}\nGame Finish\n", message).as_bytes()).await.unwrap();
+                    writer.write_all(format!("Final Board:\n{}\n{}\nGame Finish\n",final_board, message).as_bytes()).await.unwrap();
                     
                     println!("{}", message); // Print the result on the server console as well
 
-                    
                     state.game_over = true;
 
-                    // std::process::exit(0); // Exit the program
-                    break;
+                    //logic for restart the game
+                    writer.write_all(" 🤔 Do you want to play again? (yes/no):\n".as_bytes()).await.unwrap();
+                    let mut response = String::new();
+                    reader.read_line(&mut response).await.unwrap();
+                    
+                    if response.trim().to_lowercase() == "yes" 
+                    {
+                        *state = GameState::new(); // Reset the game state
+                        println!("Restart 🔄️!! Game {}", game_id);
+                    } 
+                    else 
+                    {
+                        writer.write_all("Bye!!🙋🙋 Thank you for playing!\n".as_bytes()).await.unwrap();
+                        break;
+                    }
                     
 
                 }
