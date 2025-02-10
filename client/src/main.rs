@@ -16,6 +16,7 @@ async fn main() -> io::Result<()>
     let game_over_flag_clone = game_over_flag.clone();
 
     // Spawn a new asynchronous task to handle user input
+    // read standred input 
     tokio::spawn(async move 
     {
         loop 
@@ -23,23 +24,20 @@ async fn main() -> io::Result<()>
             if *game_over_flag_clone.lock().await {
                 break; // Stop taking input if the game is over
             }
-            
             let mut input = String::new();//take input
             std::io::stdin().read_line(&mut input).unwrap();
-            
             writer.write_all(input.as_bytes()).await;// write to server
-            
-            
             println!("Wait for other Player Move");
         }
     });
 
 
     // Main loop to read lines from the TCP stream
+    //read from tcp stream
     loop 
     {
         line.clear();
-        if reader.read_line(&mut line).await.unwrap() == 0 {break}
+        if reader.read_line(&mut line).await? == 0 {break}
         println!("{}", line);
     }
 

@@ -11,7 +11,7 @@ async fn main() -> io::Result<()>
 {
     
     let listener = TcpListener::bind("127.0.0.1:2525").await?; // Bind the TCP listener to the address
-    let games: Arc<Mutex<HashMap<usize, Arc<Mutex<GameState>>>>> = Arc::new(Mutex::new(HashMap::new()));// for store multipl games with game_id
+    let games: Arc<Mutex<HashMap<usize, GameState>>> = Arc::new(Mutex::new(HashMap::new()));// for store multipl games with game_id
     let mut player_queue = Vec::new();
 
     println!("Server is running on 127.0.0.1:2525");
@@ -26,7 +26,7 @@ async fn main() -> io::Result<()>
         if player_queue.len() >= 2 { // for make game with two player
             let game_id = games_lock.len() + 1; //give unique id to game
             let game_state = Arc::new(Mutex::new(GameState::new()));
-            games_lock.insert(game_id, game_state.clone()); // store game state and id in hashmap
+            games_lock.insert(game_id, (*game_state.lock().await).clone()); // store game state and id in hashmap
 
             let player1 = player_queue.remove(0);
             let player2 = player_queue.remove(0);
@@ -148,67 +148,37 @@ async fn handle_player(stream: TcpStream, state: Arc<Mutex<GameState>>, player_i
         let mut input = String::new();
 
         reader.read_line(&mut input).await.unwrap();
-        let position: usize = match input.trim().parse() 
-        {
-            Ok(pos) => pos,
-            Err(_) => 
-            {
-                writer.write_all("Invalid input. Try again.\n".as_bytes()).await.unwrap();
-                continue;
-            }
-        };
+        let position: usize = input.trim().parse().unwrap_or(usize::MAX);
 
-        match state.make_move(position, symbol) 
+        if position != usize::MAX && state.make_move(position, symbol).is_ok() 
         {
-            Ok(_) => 
+            println!("Updated Board: Game {}\n{}", game_id, state.display_board());
+            state.current_player = if player_id == 1 { 2 } else { 1 };
+            if let Some(winner) = state.winner_chacking() 
             {
-                println!("Updated Board: Game {}\n{}", game_id, state.display_board());// print final board who win
-                state.current_player = if player_id == 1 { 2 } else { 1 }; // Switch turn to the other player
-                if let Some(winner) = state.winner_chacking() 
+                let message = if winner == "Draw" { "Game Over! It's a Draw 🤝".to_string() } 
+                else { format!("Game Over! Winner: {}", winner) };
+
+                writer.write_all(format!("Final Board:\n{}\n{}\nGame Finish\n", state.display_board(), message).as_bytes()).await.unwrap();
+                state.game_over = true;
+
+                writer.write_all("🤔 Do you want to play again? (yes/no):\n".as_bytes()).await.unwrap();
+                let mut response = String::new();
+                reader.read_line(&mut response).await.unwrap();
+                if response.trim().to_lowercase() == "yes" 
                 {
-                    let final_board = state.display_board();
-                    let message = if winner == "Draw" 
-                    {
-                        "Game Over! It's a Draw 🤝".to_string()
-                    } 
-                    else 
-                    {
-                        format!("Game Over! Winner: {}", winner)
-                    };
-
-
-                    
-                    // Notify both players about the game result
-                    writer.write_all(format!("Final Board:\n{}\n{}\nGame Finish\n",final_board, message).as_bytes()).await.unwrap();
-                    
-                    println!("{}", message); // Print the result on the server console as well
-
-                    state.game_over = true;
-
-                    //logic for restart the game
-                    writer.write_all(" 🤔 Do you want to play again? (yes/no):\n".as_bytes()).await.unwrap();
-                    let mut response = String::new();
-                    reader.read_line(&mut response).await.unwrap();
-                    
-                    if response.trim().to_lowercase() == "yes" 
-                    {
-                        *state = GameState::new(); // Reset the game state
-                        println!("Restart 🔄️!! Game {}", game_id);
-                    } 
-                    else 
-                    {
-                        writer.write_all("Bye!!🙋🙋 Thank you for playing!\n".as_bytes()).await.unwrap();
-                        break;
-                    }
-                    
-
+                    *state = GameState::new();
+                    println!("Restart 🔄️!! Game {}", game_id);
+                } else 
+                {
+                    writer.write_all("Bye!!🙋🙋 Thank you for playing!\n".as_bytes()).await.unwrap();
+                    break;
                 }
             }
-            Err(_) => 
-            {
-                writer.write_all(format!("Game IS Finish\n").as_bytes()).await.unwrap();
-            }
+        } else {
+            writer.write_all("Invalid input. Try again.\n".as_bytes()).await.unwrap();
+        }
         }
     }
-}
+
 
