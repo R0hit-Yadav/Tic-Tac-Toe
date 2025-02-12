@@ -499,6 +499,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "prelude"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c70d2a17efd6d4063aa8a13d2ce7b0ceeef96ed9e2138c2803f7f4f9824c2cbb"
+
+[[package]]
 name = "proc-macro2"
 version = "1.0.93"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -626,6 +632,7 @@ version = "0.1.0"
 dependencies = [
  "clap",
  "ed25519-dalek",
+ "prelude",
  "rand",
  "serde",
  "serde_json",
