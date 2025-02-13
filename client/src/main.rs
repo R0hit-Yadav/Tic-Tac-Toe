@@ -1,69 +1,52 @@
+// client.rs
 use tokio::net::TcpStream;
-use tokio::io::{self, AsyncBufReadExt, AsyncWriteExt, BufReader};
-use tokio::select;
-use tokio::time::{self, Duration};
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, BufWriter};
+use std::error::Error;
 
 #[tokio::main]
-async fn main() -> io::Result<()> {
-    let mut stream = TcpStream::connect("127.0.0.1:2525").await?;
-    println!("Connected to server at 127.0.0.1:2525");
+async fn main() -> Result<(), Box<dyn Error>> {
+    let addr = "127.0.0.1:8080";
+    let stream = TcpStream::connect(addr).await?;
+    println!("Connected to {}", addr);
 
-    // Create a BufReader to read incoming messages from the server
-    let mut reader = BufReader::new(stream.clone());
+    let (read_half, write_half) = stream.into_split();
+    let mut server_reader = BufReader::new(read_half);
+    let mut server_writer = BufWriter::new(write_half);
 
-    let stdin = io::stdin();
-    let mut stdin = BufReader::new(stdin);
-
-    let timeout_duration = Duration::from_secs(10); 
-
+    let mut stdin_reader = BufReader::new(tokio::io::stdin());
     loop {
-        select! {
-            result = reader.read_line(&mut String::new()) => {
-                let mut buffer = String::new();
-                match result {
-                    Ok(0) => {
-                        println!("Disconnected from server.");
+        let mut line = String::new();
+        let mut input = String::new();
+        
+        tokio::select! {
+            bytes = server_reader.read_line(&mut line) => {
+                if let Ok(read_bytes) = bytes {
+                    if read_bytes == 0 {
+                        println!("Server closed the connection.");
                         break;
                     }
-                    Ok(_) => {
-                        buffer = String::new();
-                        reader.read_line(&mut buffer).await?;
-                        println!("Server response: {}", buffer.trim());
-                    }
-                    Err(e) => {
-                        println!("Error reading from server: {}", e);
-                        break;
-                    }
+                    println!("{}", line);
+                } else {
+                    println!("Error reading from server: {:?}", bytes.err());
+                    break;
                 }
-            }
-
-
-            result = stdin.read_line(&mut String::new()) => {
-                let mut input = String::new();
-                match result {
-                    Ok(_) => {
-                        input = String::new();
-                        stdin.read_line(&mut input).await?;
-                        
-                        let trimmed_input = input.trim();
-                        if let Err(e) = stream.write_all(trimmed_input.as_bytes()).await {
-                            println!("Error writing to server: {}", e);
-                            break;
-                        }
-                        stream.flush().await?;
-                    }
-                    Err(e) => {
-                        println!("Error reading input: {}", e);
+            },
+            bytes = stdin_reader.read_line(&mut input) => {
+                if let Ok(read_bytes) = bytes {
+                    if read_bytes == 0 {
+                        println!("Stdin closed.");
                         break;
                     }
+                    server_writer.write_all(input.as_bytes()).await?;
+                    server_writer.flush().await?;
+                } else {
+                    println!("Error reading from stdin: {:?}", bytes.err());
+                    break;
                 }
-            }
-
-            _ = time::sleep(timeout_duration) => {
-                println!("Timeout reached, no activity.");
             }
         }
     }
-
     Ok(())
 }
+
+
