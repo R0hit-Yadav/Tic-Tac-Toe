@@ -71,11 +71,15 @@ The game continues until there's a winner or a tie, and players can choose to pl
 ## Game Rules
 
 - The board is a 3x3 grid, with positions numbered from 1 to 9:
+
 1 | 2 | 3
+
 4 | 5 | 6
+
 7 | 8 | 9
 
-- Player 1 uses `❌` (X), and Player 2 uses `⭕` (O).
+
+- Player 1 uses `❌`, and Player 2 uses `⭕`.
 - Players take turns entering their moves by typing a number corresponding to an empty cell on the board.
 - The first player to get three of their symbols in a row (vertically, horizontally, or diagonally) wins.
 - If all the cells are filled and no player has won, the game ends in a tie.
@@ -83,8 +87,11 @@ The game continues until there's a winner or a tie, and players can choose to pl
 ## Game Board Example
 
 Here is an example of the game board during play:
+
 ❌ | 2 | 3
+
 4  | ⭕| 6
+
 7  | 8  | 9
 
 
